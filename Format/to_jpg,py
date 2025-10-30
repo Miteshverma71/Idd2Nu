@@ -1,0 +1,30 @@
+import os
+from PIL import Image
+
+# Input camera folder
+camera_folder = "/home/miteshv/Documents/data_converter/data/idd_test/camera"
+
+# Output folder (inside current directory for safety)
+output_folder = "/home/miteshv/Documents/data_converter/output_conv/camera"
+os.makedirs(output_folder, exist_ok=True)
+
+# Loop through cam0 to cam5
+for cam_name in ["cam0", "cam1", "cam2", "cam3", "cam4", "cam5"]:
+    input_images_folder = os.path.join(camera_folder, cam_name)
+    output_images_folder = os.path.join(output_folder, cam_name)
+    os.makedirs(output_images_folder, exist_ok=True)
+
+    for filename in os.listdir(input_images_folder):
+        file_path = os.path.join(input_images_folder, filename)
+        if not os.path.isfile(file_path):
+            continue
+        try:
+            with Image.open(file_path) as img:
+                rgb_img = img.convert("RGB")
+                new_filename = os.path.splitext(filename)[0] + ".jpg"
+                new_file_path = os.path.join(output_images_folder, new_filename)
+                rgb_img.save(new_file_path, "JPEG")
+        except Exception as e:
+            print(f"Failed to convert {file_path}: {e}")
+
+print(" All images converted to JPG format and saved in:", output_folder)
