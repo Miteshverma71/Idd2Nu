@@ -1,15 +1,15 @@
-import json
-from pathlib import Path
-
 def generate_sample_data_json(path, ego_pose_data, tokens, scene_number=1):
     """
     Generate sample data JSON for a specific scene
     
     Args:
-        path: Output path for the sample data JSON file
+        path: Output path for the sample data JSON file (can be None)
         ego_pose_data: List of ego pose data
         tokens: Dictionary containing token information
         scene_number: Scene number (1-5) for ArgoV2 scenes
+        
+    Returns:
+        List of sample data entries
     """
     entries = []
     num_frames = len(ego_pose_data)
@@ -35,7 +35,7 @@ def generate_sample_data_json(path, ego_pose_data, tokens, scene_number=1):
                 "sample_token": tokens.get(f"{scene_prefix}sample_{i}"),
                 "ego_pose_token": tokens.get(f"{scene_prefix}ego_{i}"),
                 "calibrated_sensor_token": tokens.get(f"calib_{sensor_name}"),
-                "filename": f"scene_{scene_number}/{sensor_name}/{frame_number:08d}.{file_extension}",
+                "filename": f"samples/{sensor_name}/{scene_number}_{frame_number:08d}.{file_extension}",
                 "fileformat": file_extension,
                 "timestamp": timestamp,
                 "is_key_frame": True,
@@ -45,10 +45,15 @@ def generate_sample_data_json(path, ego_pose_data, tokens, scene_number=1):
                 "next": tokens.get(f"sd_{sensor_name}_{scene_number-1}_{i+1}") if i < num_frames - 1 else ""
             })
 
-    # Ensure the output directory exists
-    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    # Only write to file if path is provided
+    if path is not None:
+        # Ensure the output directory exists
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        
+        # Write to file
+        with open(path, 'w') as f:
+            json.dump(entries, f, indent=4)
+        
+        print(f"✅ Sample data JSON created at {path}")
     
-    with open(path, "w") as f:
-        json.dump(entries, f, indent=4)
-
-    print(f" {path} created successfully for scene {scene_number}!")
+    return entries
