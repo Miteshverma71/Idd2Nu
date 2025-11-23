@@ -1,12 +1,12 @@
 import json
 from pathlib import Path
 from typing import List, Dict, Any
-
+from token_manager import TokenManager
 
 def generate_scene_json(
     output_path: Path,
     num_frames: int,
-    tokens: 'TokenManager',
+    tokens: TokenManager,
     scene_number: int = 1,
     num_scenes: int = 1
 ) -> List[Dict[str, Any]]:
@@ -30,10 +30,11 @@ def generate_scene_json(
         scene_token = tokens.get_or_create_scene_token(scene_idx)
         first_sample_token = tokens.get_or_create_sample_token(scene_idx, 0)
         last_sample_token = tokens.get_or_create_sample_token(scene_idx, num_frames - 1)
+        log_token = tokens.get_or_create_log_token(scene_idx)
         
         scene_data = {
             "token": scene_token,
-            "log_token": tokens.get_or_create(f"log_{scene_idx-1}"),
+            "log_token": log_token,
             "nbr_samples": num_frames,
             "first_sample_token": first_sample_token,
             "last_sample_token": last_sample_token,
@@ -42,12 +43,14 @@ def generate_scene_json(
         }
         scenes.append(scene_data)
     
-    # Ensure output directory exists
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    
-    # Write to file
-    with open(output_path, "w") as f:
-        json.dump(scenes, f, indent=4)
+    # Only write to file if output_path is provided
+    if output_path is not None:
+        # Ensure output directory exists
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        # Write to file
+        with open(output_path, "w") as f:
+            json.dump(scenes, f, indent=4)
     
     print(f"✅ {output_path} created with {num_scenes} scenes")
     return scenes
