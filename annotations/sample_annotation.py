@@ -1,9 +1,22 @@
 import json
+from pathlib import Path
+from typing import List, Dict, Any
+from token_manager import TokenManager
 
-def generate_sample_annotation_json(output_path, annotation_data, tokens):
+def generate_sample_annotation_json(
+    output_path: Path,
+    annotation_data: List[Dict[str, Any]],
+    tokens: TokenManager,
+    scene_number: int
+):
     """
-    Generate sample_annotation.json with proper token references.
-    Maps category names to category tokens.
+    Generate sample_annotation.json for a specific scene with proper token references.
+    
+    Args:
+        output_path: Path to save the JSON file
+        annotation_data: List of annotation dictionaries
+        tokens: TokenManager instance
+        scene_number: Scene number for token generation
     """
     # Category name to token key mapping
     category_mapping = {
@@ -22,28 +35,27 @@ def generate_sample_annotation_json(output_path, annotation_data, tokens):
     annotations = []
     
     for i, ann in enumerate(annotation_data):
-        token = tokens.get(f"ann_{i}")
-        sample_token = tokens.get(f"sample_{i}")
+        # Generate tokens
+        annotation_token = tokens.get(f"ann_{scene_number}_{i}")
+        sample_token = tokens.get_or_create_sample_token(scene_number, ann.get("frame_idx", i))
         
-        # Create instance token from track_uuid if it exists, otherwise use default
+        # Instance token from track_uuid if available
         track_uuid = ann.get("track_uuid", "")
-        if track_uuid:
-            instance_token = tokens.get(f"inst_{track_uuid}")
-        else:
-            instance_token = tokens.get("inst_car")  # Default instance
+        instance_token = tokens.get(f"inst_{track_uuid}") if track_uuid else tokens.get("inst_default")
         
-        # Map category name to category token
+        # Category token
         category_name = ann.get("category", "")
-        category_token_key = category_mapping.get(category_name, "cat_car")  # Default to car if unknown
+        category_token_key = category_mapping.get(category_name, "cat_car")
         category_token = tokens.get(category_token_key)
         
-        visibility_token = str((i % 4) + 1)  # Fixed: visibility has tokens 1-4, not 1-5
+        visibility_token = str((i % 4) + 1)  # Visibility tokens: 1-4
         attribute_tokens = [tokens.get("attr_moving")]  # Example attribute
+        
         prev = annotations[-1]["token"] if i > 0 else ""
         next = ""
-
+        
         annotation = {
-            "token": token,
+            "token": annotation_token,
             "sample_token": sample_token,
             "instance_token": instance_token,
             "category_token": category_token,
@@ -57,14 +69,18 @@ def generate_sample_annotation_json(output_path, annotation_data, tokens):
             "num_lidar_pts": ann.get("num_interior_pts", 0),
             "num_radar_pts": 0
         }
-
+        
+    # Update next token for previous annotation
         if i > 0:
-            annotations[-1]["next"] = token
+            annotations[-1]["next"] = annotation_token
+    
         annotations.append(annotation)
 
-    with open(output_path, "w") as f:
-        json.dump(annotations, f, indent=4)
+    # Only write to file if output_path is provided
+    if output_path is not None:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(output_path, "w") as f:
+            json.dump(annotations, f, indent=4)
+        print(f"✅ {output_path} created successfully!")
     
-    print(f"Created {output_path} successfully!")
-
-
+    return annotations
