@@ -4,34 +4,41 @@ from pathlib import Path
 import argparse
 
 
+# ---------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------
+
 def new_token():
     return str(uuid.uuid4())
 
 
-def convert_xyz_to_nodes(coords, nodes):
-    """Convert XYZ points to node tokens with full nuScenes node format."""
+def convert_xyz_to_nodes(coords, node_list):
     tokens = []
     for pt in coords:
-        token = new_token()
-        nodes.append({
-            "token": token,
-            "x": pt["x"],
-            "y": pt["y"],
-            "z": pt.get("z", 0.0)
+        tok = new_token()
+        node_list.append({
+            "token": tok,
+            "x": float(pt["x"]),
+            "y": float(pt["y"]),
+            "z": float(pt.get("z", 0.0))
         })
-        tokens.append(token)
+        tokens.append(tok)
     return tokens
 
 
-def convert_lane_segment(seg, nodes):
-    left = convert_xyz_to_nodes(seg["left_lane_boundary"], nodes)
-    right = convert_xyz_to_nodes(seg["right_lane_boundary"], nodes)
+# ---------------------------------------------------------
+# Converters for dataset2 categories
+# ---------------------------------------------------------
+
+def convert_lane_segment(seg, node_list):
+    left_tokens = convert_xyz_to_nodes(seg["left_lane_boundary"], node_list)
+    right_tokens = convert_xyz_to_nodes(seg["right_lane_boundary"], node_list)
 
     return {
         "token": new_token(),
         "lane_type": seg.get("lane_type", "NONE"),
-        "left_boundary": left,
-        "right_boundary": right,
+        "left_boundary": left_tokens,
+        "right_boundary": right_tokens,
         "predecessors": seg.get("predecessors", []),
         "successors": seg.get("successors", []),
         "left_neighbor": seg.get("left_neighbor_id"),
@@ -40,9 +47,9 @@ def convert_lane_segment(seg, nodes):
     }
 
 
-def convert_ped_crossing(pc, nodes):
-    edge1 = convert_xyz_to_nodes(pc["edge1"], nodes)
-    edge2 = convert_xyz_to_nodes(pc["edge2"], nodes)
+def convert_ped_crossing(pc, node_list):
+    edge1 = convert_xyz_to_nodes(pc["edge1"], node_list)
+    edge2 = convert_xyz_to_nodes(pc["edge2"], node_list)
 
     return {
         "token": new_token(),
@@ -51,24 +58,82 @@ def convert_ped_crossing(pc, nodes):
     }
 
 
-def convert_drivable_area(area, nodes):
-    if "polygon" not in area:
-        return None
-    poly = convert_xyz_to_nodes(area["polygon"], nodes)
+# ---------------------------------------------------------
+# Dummy placeholder generators
+# ---------------------------------------------------------
+
+def placeholder_polygon():
     return {
         "token": new_token(),
-        "polygon": poly
+        "exterior_node_tokens": [],
+        "interior_node_tokens": []
     }
 
 
-def convert_scene_to_nuscenes(scene_path, output_path):
+def placeholder_line():
+    return {
+        "token": new_token(),
+        "node_tokens": []
+    }
 
-    print("Loading scene map:", scene_path)
+
+def placeholder_generic_polygon_token():
+    return {
+        "token": new_token(),
+        "polygon_token": None
+    }
+
+
+def placeholder_empty():
+    return {"token": new_token()}
+
+
+# ---------------------------------------------------------
+# Convert a single scene to nuScenes format
+# ---------------------------------------------------------
+
+def convert_scene(scene_path):
+    print(f"Converting scene: {scene_path}")
+
     with open(scene_path, "r") as f:
         d2 = json.load(f)
 
-    # new nuScenes-style structure
     out = {
+        "node": [],
+        "lane": [],
+        "ped_crossing": [],
+        "drivable_area": []
+    }
+
+    nodes = out["node"]
+
+    # lane_segments → lane
+    for seg_id, seg in d2.get("lane_segments", {}).items():
+        out["lane"].append(convert_lane_segment(seg, nodes))
+
+    # pedestrian_crossings → ped_crossing
+    for cid, c in d2.get("pedestrian_crossings", {}).items():
+        out["ped_crossing"].append(convert_ped_crossing(c, nodes))
+
+    # drivable_areas → drivable_area
+    for aid, area in d2.get("drivable_areas", {}).items():
+        if "polygon" in area:
+            poly_tokens = convert_xyz_to_nodes(area["polygon"], nodes)
+            out["drivable_area"].append({
+                "token": new_token(),
+                "polygon": poly_tokens
+            })
+
+    return out
+
+
+# ---------------------------------------------------------
+# Merge 5 scenes
+# ---------------------------------------------------------
+
+def merge_scenes(scene_paths, output_path):
+
+    final_out = {
         "node": [],
         "lane": [],
         "ped_crossing": [],
@@ -90,57 +155,94 @@ def convert_scene_to_nuscenes(scene_path, output_path):
         "version": "1.0"
     }
 
-    nodes = out["node"]
+    # Process each scene
+    for scene in scene_paths:
+        scene_out = convert_scene(scene)
 
-    # ---- convert lanes ----
-    for seg_id, seg in d2.get("lane_segments", {}).items():
-        out["lane"].append(convert_lane_segment(seg, nodes))
+        final_out["node"].extend(scene_out["node"])
+        final_out["lane"].extend(scene_out["lane"])
+        final_out["ped_crossing"].extend(scene_out["ped_crossing"])
+        final_out["drivable_area"].extend(scene_out["drivable_area"])
 
-    # ---- convert pedestrian crossings ----
-    for cid, c in d2.get("pedestrian_crossings", {}).items():
-        out["ped_crossing"].append(convert_ped_crossing(c, nodes))
+    # Add placeholders (minimal)
+    if len(final_out["polygon"]) == 0:
+        final_out["polygon"].append(placeholder_polygon())
 
-    # ---- convert drivable areas ----
-    for did, da in d2.get("drivable_areas", {}).items():
-        conv = convert_drivable_area(da, nodes)
-        if conv:
-            out["drivable_area"].append(conv)
+    if len(final_out["line"]) == 0:
+        final_out["line"].append(placeholder_line())
 
-    print("Writing converted nuScenes map:", output_path)
+    if len(final_out["road_segment"]) == 0:
+        final_out["road_segment"].append(placeholder_generic_polygon_token())
+
+    if len(final_out["road_block"]) == 0:
+        final_out["road_block"].append(placeholder_generic_polygon_token())
+
+    if len(final_out["walkway"]) == 0:
+        final_out["walkway"].append(placeholder_generic_polygon_token())
+
+    if len(final_out["stop_line"]) == 0:
+        final_out["stop_line"].append(placeholder_line())
+
+    if len(final_out["carpark_area"]) == 0:
+        final_out["carpark_area"].append(placeholder_generic_polygon_token())
+
+    if len(final_out["road_divider"]) == 0:
+        final_out["road_divider"].append(placeholder_line())
+
+    if len(final_out["lane_divider"]) == 0:
+        final_out["lane_divider"].append(placeholder_line())
+
+    if len(final_out["traffic_light"]) == 0:
+        final_out["traffic_light"].append(placeholder_empty())
+
+    if len(final_out["lane_connector"]) == 0:
+        final_out["lane_connector"].append(placeholder_generic_polygon_token())
+
+    # Save merged output
+    print("Writing merged map:", output_path)
     with open(output_path, "w") as f:
-        json.dump(out, f, indent=2)
+        json.dump(final_out, f, indent=2)
 
-    print("✔ Done — dataset2 converted into nuScenes format.")
+    print("✔ All 5 scenes merged successfully!")
 
+
+# ---------------------------------------------------------
+# CLI
+# ---------------------------------------------------------
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Convert dataset2 → nuScenes map format")
+    parser = argparse.ArgumentParser(description="Merge 5 scenes → one nuScenes map")
 
-    # Use raw string (r-prefix) for Windows paths
-    default_scene_path = r"C:\Users\mitvi\Downloads\argov2_00000\argov2_00000\argov2_1\map\map_log_scene1.json"
-    
     parser.add_argument(
-        "--scene_map",
+        "--base_folder",
         type=str,
-        default=default_scene_path,
-        help="Path to dataset2 scene map"
+        default=r"C:\Users\mitvi\Downloads\argov2_00000\argov2_00000",
+        help="Base folder containing argov2_1 ... argov2_5"
     )
 
     parser.add_argument(
         "--output",
         type=str,
-        default="converted_nuscenes_map.json",
-        help="Output nuScenes map file"
+        default=r"C:\Users\mitvi\Downloads\merged_nuscenes_map.json",
+        help="Output merged nuScenes map file"
     )
 
     args = parser.parse_args()
-    
-    # Convert to Path objects after parsing
-    scene_path = Path(args.scene_map).resolve()
-    output_path = Path(args.output).resolve()
-    
-    # Ensure output directory exists
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    
-    convert_scene_to_nuscenes(str(scene_path), str(output_path))
 
+    base = Path(args.base_folder)
+
+    # expected scene files
+    scene_paths = [
+        base / f"argov2_{i}" / "map" / f"map_log_scene{i}.json"
+        for i in [1, 2, 3, 4, 5]
+    ]
+
+    # verify
+    for p in scene_paths:
+        if not p.exists():
+            raise FileNotFoundError(f"Scene file missing: {p}")
+
+    output_path = Path(args.output)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    merge_scenes([str(p) for p in scene_paths], str(output_path))
