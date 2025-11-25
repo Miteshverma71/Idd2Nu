@@ -1,9 +1,8 @@
+
 import json
-import os
 import csv
 from pathlib import Path
-from typing import List, Dict, Any
-import numpy as np
+from typing import List
 
 def read_csv_timestamps(csv_path: str) -> List[int]:
     """Read timestamps from CSV file."""
@@ -12,7 +11,7 @@ def read_csv_timestamps(csv_path: str) -> List[int]:
         return [int(row[0]) for row in reader if row]
 
 def process_can_file(input_path: str, output_path: str, timestamps: List[int]):
-    """Process a single CAN file to update timestamps."""
+    """Process a single CAN file to update timestamps and trim extra entries."""
     try:
         with open(input_path, 'r') as f:
             data = json.load(f)
@@ -23,20 +22,25 @@ def process_can_file(input_path: str, output_path: str, timestamps: List[int]):
     if not data:
         return
     
-    # For list of dictionaries with 'utime' key (like vehicle_monitor.json, ms_imu.json, etc.)
+    # For list of dictionaries with 'utime' key
     if isinstance(data, list) and len(data) > 0 and isinstance(data[0], dict) and 'utime' in data[0]:
+        # Trim data to match number of timestamps
+        original_len = len(data)
+        data = data[:len(timestamps)]
+        
         for i, entry in enumerate(data):
-            timestamp_idx = i % len(timestamps)
-            entry['utime'] = timestamps[timestamp_idx]
-    # For meta.json which is a dictionary with message statistics
+            entry['utime'] = timestamps[i]
+        
+        print(f"  Trimmed from {original_len} to {len(data)} entries and updated timestamps")
+    
+    # For meta.json
     elif isinstance(data, dict) and 'message_count' in str(data):
-        # Skip updating timestamps for meta files as they contain statistics
         print(f"  Skipping timestamp update for meta file")
     else:
         print(f"  Warning: Unsupported JSON structure in {input_path}")
         return
     
-    # Save the updated data
+    # Save updated data
     try:
         with open(output_path, 'w') as f:
             json.dump(data, f, indent=2)
@@ -44,22 +48,18 @@ def process_can_file(input_path: str, output_path: str, timestamps: List[int]):
         print(f"  Error: Failed to write JSON to {output_path} - {e}")
 
 def main():
-    # Base directories
-    base_dir = Path(r"C:\Users\mitvi\Downloads\argov2_00000")
+    base_dir = Path(r"/home/miteshv/Downloads/can_bus")
     canbus_temp = base_dir / "canbus_temp"
     output_dir = base_dir / "output" / "canbus"
-    csv_path = r"C:\Users\mitvi\Downloads\argov2_00000\argov2_00000\argov2_1\pcd_bin_files.csv"
+    csv_path = r"/home/miteshv/Downloads/av2_train000_5scenes/argov2_1/pcd_bin_files.csv"
     
-    # Create output directory
     output_dir.mkdir(parents=True, exist_ok=True)
     
-    # Read timestamps from CSV
     timestamps = read_csv_timestamps(csv_path)
     if not timestamps:
         print("Error: No timestamps found in CSV file")
         return
     
-    # List of CAN file patterns to process
     can_file_patterns = [
         "scene-0001_meta.json",
         "scene-0001_ms_imu.json",
@@ -71,7 +71,6 @@ def main():
         "scene-0001_zoesensors.json"
     ]
     
-    # Process each CAN file
     for pattern in can_file_patterns:
         input_path = canbus_temp / pattern
         output_path = output_dir / pattern
